@@ -2,7 +2,8 @@
   "permissions": {
     "allow": [
       "Bash(gh auth:*)",
-      "Bash(git:*)"
+      "Bash(git:*)",
+      "Bash(gh repo:*)"
     ]
   }
 }

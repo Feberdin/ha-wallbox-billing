@@ -8,7 +8,6 @@ import voluptuous as vol
 
 from homeassistant import config_entries
 from homeassistant.components.sensor import SensorDeviceClass
-from homeassistant.const import UnitOfEnergy
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
@@ -149,21 +148,18 @@ class WallboxBillingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         )
 
     @staticmethod
-    def async_get_options_flow(config_entry):
-        return WallboxBillingOptionsFlow(config_entry)
+    def async_get_options_flow(config_entry: config_entries.ConfigEntry) -> "WallboxBillingOptionsFlow":
+        return WallboxBillingOptionsFlow()
 
 
 class WallboxBillingOptionsFlow(config_entries.OptionsFlow):
     """Options flow to update settings after initial setup."""
 
-    def __init__(self, config_entry: config_entries.ConfigEntry) -> None:
-        self._config_entry = config_entry
-
     async def async_step_init(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
         """Show options form."""
-        cfg = {**self._config_entry.data, **self._config_entry.options}
+        cfg = {**self.config_entry.data, **self.config_entry.options}
         errors: dict[str, str] = {}
 
         if user_input is not None:
