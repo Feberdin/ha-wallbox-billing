@@ -1,0 +1,12 @@
+{
+  "domain": "wallbox_billing",
+  "name": "Wallbox Abrechnung",
+  "version": "1.0.0",
+  "documentation": "https://github.com/Feberdin/ha-wallbox-billing",
+  "issue_tracker": "https://github.com/Feberdin/ha-wallbox-billing/issues",
+  "requirements": ["fpdf2==2.8.2"],
+  "dependencies": [],
+  "codeowners": ["@Feberdin"],
+  "iot_class": "local_polling",
+  "config_flow": true
+}

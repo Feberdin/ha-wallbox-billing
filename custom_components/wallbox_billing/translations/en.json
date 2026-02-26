@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wallbox Billing – Basic Setup",
+        "description": "Select the ESPHome energy sensor and enter the meter reading from the last billing as a starting value.",
+        "data": {
+          "energy_sensor": "Energy Sensor (Wallbox meter reading)",
+          "owner_name": "Your Name (invoice sender)",
+          "meter_number": "Meter Number",
+          "price_per_kwh": "Electricity price (€/kWh)",
+          "initial_reading": "Meter reading at last billing (start value)",
+          "initial_date": "Date of last billing"
+        }
+      },
+      "smtp": {
+        "title": "Wallbox Billing – E-Mail / SMTP",
+        "data": {
+          "recipient_email": "Recipient e-mail (employer)",
+          "smtp_host": "SMTP server (e.g. smtp.gmail.com)",
+          "smtp_port": "SMTP port (e.g. 587 for TLS, 465 for SSL)",
+          "smtp_from_email": "Sender e-mail",
+          "smtp_username": "SMTP username (leave blank if not needed)",
+          "smtp_password": "SMTP password",
+          "smtp_use_tls": "Use STARTTLS",
+          "smtp_use_ssl": "Use SSL/TLS (port 465)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to SMTP server.",
+      "invalid_auth": "Invalid credentials.",
+      "unknown": "Unknown error."
+    },
+    "abort": {
+      "already_configured": "Wallbox Billing is already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Update settings",
+        "data": {
+          "price_per_kwh": "Electricity price (€/kWh)",
+          "recipient_email": "Recipient e-mail",
+          "owner_name": "Your name",
+          "meter_number": "Meter number",
+          "smtp_host": "SMTP server",
+          "smtp_port": "SMTP port",
+          "smtp_from_email": "Sender e-mail",
+          "smtp_username": "SMTP username",
+          "smtp_password": "SMTP password",
+          "smtp_use_tls": "STARTTLS",
+          "smtp_use_ssl": "SSL/TLS"
+        }
+      }
+    }
+  }
+}
