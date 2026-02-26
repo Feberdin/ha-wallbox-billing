@@ -1,0 +1,7 @@
+send_invoice:
+  name: Wallbox-Rechnung erstellen & senden
+  description: >
+    Erstellt eine PDF-Rechnung für den aktuellen Abrechnungszeitraum und
+    sendet sie per E-Mail. Anschließend wird der aktuelle Zählerstand als
+    neuer Startwert gespeichert.
+  fields: {}

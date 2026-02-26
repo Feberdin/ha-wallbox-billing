@@ -13,11 +13,13 @@ def _fmt_kwh(value: float) -> str:
 
 
 def _fmt_eur(value: float) -> str:
-    return f"{value:,.2f} €".replace(",", "X").replace(".", ",").replace("X", ".")
+    # fpdf2's built-in fonts use latin-1; the € sign (U+20AC) is outside that
+    # range, so we use "EUR" which is universally accepted on German invoices.
+    return f"{value:,.2f} EUR".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 def _fmt_price(value: float) -> str:
-    return f"{value:.4f} €/kWh".replace(".", ",")
+    return f"{value:.4f} EUR/kWh".replace(".", ",")
 
 
 def generate_invoice_pdf(
