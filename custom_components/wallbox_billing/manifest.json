@@ -1,7 +1,7 @@
 {
   "domain": "wallbox_billing",
   "name": "Wallbox Abrechnung",
-  "version": "1.0.0",
+  "version": "1.0.4",
   "documentation": "https://github.com/Feberdin/ha-wallbox-billing",
   "issue_tracker": "https://github.com/Feberdin/ha-wallbox-billing/issues",
   "requirements": ["fpdf2>=2.7.6"],

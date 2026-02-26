@@ -16,6 +16,8 @@ from homeassistant.helpers.storage import Store
 
 from .const import (
     CONF_ENERGY_SENSOR,
+    CONF_INITIAL_DATE,
+    CONF_INITIAL_READING,
     CONF_METER_NUMBER,
     CONF_OWNER_NAME,
     CONF_PRICE_PER_KWH,
@@ -108,12 +110,19 @@ async def _async_send_invoice(
     today = datetime.date.today()
 
     if last_reading is None:
-        _LOGGER.warning(
-            "Kein vorheriger Zählerstand gespeichert – "
-            "aktueller Stand wird als Startpunkt gesetzt."
+        # First invoice: use the initial values entered during setup
+        last_reading = float(cfg.get(CONF_INITIAL_READING, 0.0))
+        initial_date_str = cfg.get(CONF_INITIAL_DATE)
+        last_date = (
+            datetime.date.fromisoformat(initial_date_str)
+            if initial_date_str
+            else today.replace(day=1)
         )
-        last_reading = current_reading
-        last_date = today.replace(day=1)
+        _LOGGER.info(
+            "Erste Abrechnung – verwende Startwert aus Konfiguration: %.3f kWh ab %s",
+            last_reading,
+            last_date,
+        )
     else:
         last_date = (
             datetime.date.fromisoformat(last_date_str)
