@@ -47,7 +47,7 @@ _STEP1_SCHEMA = vol.Schema(
             selector.NumberSelectorConfig(
                 min=0.0,
                 max=10.0,
-                step=0.0001,
+                step=0.001,
                 mode=selector.NumberSelectorMode.BOX,
                 unit_of_measurement="€/kWh",
             )
@@ -173,7 +173,7 @@ class WallboxBillingOptionsFlow(config_entries.OptionsFlow):
                     selector.NumberSelectorConfig(
                         min=0.0,
                         max=10.0,
-                        step=0.0001,
+                        step=0.001,
                         mode=selector.NumberSelectorMode.BOX,
                         unit_of_measurement="€/kWh",
                     )
