@@ -1,0 +1,6 @@
+{
+  "name": "Wallbox Abrechnung",
+  "content_in_root": false,
+  "homeassistant": "2024.1.0",
+  "filename": "wallbox_billing.zip"
+}
