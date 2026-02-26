@@ -1,0 +1,59 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Wallbox Abrechnung – Grundeinstellungen",
+        "description": "Wähle den Energiesensor deiner ESPHome-Wallbox und gib den Zählerstand der letzten Abrechnung als Startwert ein.",
+        "data": {
+          "energy_sensor": "Energiesensor (Wallbox Zählerstand)",
+          "owner_name": "Dein Name (Absender der Rechnung)",
+          "meter_number": "Zählernummer",
+          "price_per_kwh": "Strompreis (€/kWh)",
+          "initial_reading": "Zählerstand bei letzter Abrechnung (Startwert)",
+          "initial_date": "Datum der letzten Abrechnung"
+        }
+      },
+      "smtp": {
+        "title": "Wallbox Abrechnung – E-Mail / SMTP",
+        "data": {
+          "recipient_email": "Empfänger-E-Mail (Arbeitgeber)",
+          "smtp_host": "SMTP-Server (z. B. smtp.gmail.com)",
+          "smtp_port": "SMTP-Port (z. B. 587 für TLS, 465 für SSL)",
+          "smtp_from_email": "Absender-E-Mail",
+          "smtp_username": "SMTP-Benutzername (leer lassen wenn nicht benötigt)",
+          "smtp_password": "SMTP-Passwort",
+          "smtp_use_tls": "STARTTLS verwenden",
+          "smtp_use_ssl": "SSL/TLS verwenden (Port 465)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Verbindung zum SMTP-Server fehlgeschlagen.",
+      "invalid_auth": "Ungültige Anmeldedaten.",
+      "unknown": "Unbekannter Fehler."
+    },
+    "abort": {
+      "already_configured": "Wallbox Abrechnung ist bereits konfiguriert."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Einstellungen anpassen",
+        "data": {
+          "price_per_kwh": "Strompreis (€/kWh)",
+          "recipient_email": "Empfänger-E-Mail",
+          "owner_name": "Dein Name",
+          "meter_number": "Zählernummer",
+          "smtp_host": "SMTP-Server",
+          "smtp_port": "SMTP-Port",
+          "smtp_from_email": "Absender-E-Mail",
+          "smtp_username": "SMTP-Benutzername",
+          "smtp_password": "SMTP-Passwort",
+          "smtp_use_tls": "STARTTLS",
+          "smtp_use_ssl": "SSL/TLS"
+        }
+      }
+    }
+  }
+}
