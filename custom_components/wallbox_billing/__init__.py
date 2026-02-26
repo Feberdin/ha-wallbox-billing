@@ -1,7 +1,6 @@
 """Wallbox Billing – Home Assistant custom integration."""
 from __future__ import annotations
 
-import asyncio
 import datetime
 import logging
 import smtplib
@@ -13,7 +12,6 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.helpers import config_validation as cv
 from homeassistant.helpers.storage import Store
 
 from .const import (
@@ -34,7 +32,6 @@ from .const import (
     STORAGE_KEY,
     STORAGE_VERSION,
 )
-from .pdf_generator import generate_invoice_pdf
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -128,6 +125,9 @@ async def _async_send_invoice(
     meter_number = cfg[CONF_METER_NUMBER]
     recipient_email = cfg[CONF_RECIPIENT_EMAIL]
     price_per_kwh = float(cfg[CONF_PRICE_PER_KWH])
+
+    # Lazy import so the package loads even if fpdf2 isn't installed yet
+    from .pdf_generator import generate_invoice_pdf  # noqa: PLC0415
 
     # Generate PDF in executor (fpdf2 is sync)
     pdf_bytes = await hass.async_add_executor_job(
