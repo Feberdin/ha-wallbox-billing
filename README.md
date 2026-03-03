@@ -9,6 +9,13 @@ Eine Home Assistant Custom Integration zur automatischen Erstellung und dem Vers
 
 Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevanten Daten und versendet es direkt per E-Mail an den Arbeitgeber.
 
+**Rechnungsbeispiel (Vorschau):**
+
+<p align="center">
+  <img src="docs/examples/rechnungsbeispiel-seite-1.png" alt="Rechnungsbeispiel Seite 1" width="48%" />
+  <img src="docs/examples/rechnungsbeispiel-seite-2.png" alt="Rechnungsbeispiel Seite 2" width="48%" />
+</p>
+
 ---
 
 ## Inhaltsverzeichnis
