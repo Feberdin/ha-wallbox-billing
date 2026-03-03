@@ -1,4 +1,7 @@
-# Claude Code lokale Konfiguration
+# Lokale KI-Kontext-Datei (nicht für Endnutzer)
+PROJEKT_KONTEXT.md
+
+# Lokale Konfiguration
 .claude/
 
 # Bedienungsanleitungen / Datenblätter (binäre PDFs gehören nicht ins Repo)
