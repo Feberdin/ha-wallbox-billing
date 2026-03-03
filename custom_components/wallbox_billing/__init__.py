@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import datetime
 import logging
+import random
 import smtplib
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
@@ -13,9 +14,12 @@ import voluptuous as vol
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers.storage import Store
+from homeassistant.util import dt as dt_util
 
 from .const import (
+    CONF_DAILY_STATS_HOUR,
     CONF_ENERGY_SENSOR,
+    CONF_INCLUDE_DAILY_STATS,
     CONF_INITIAL_DATE,
     CONF_INITIAL_READING,
     CONF_METER_NUMBER,
@@ -29,8 +33,12 @@ from .const import (
     CONF_SMTP_USE_SSL,
     CONF_SMTP_USE_TLS,
     CONF_SMTP_USERNAME,
+    DEFAULT_DAILY_STATS_HOUR,
+    DEFAULT_INCLUDE_DAILY_STATS,
     DOMAIN,
     SERVICE_SEND_INVOICE,
+    SERVICE_SEND_SAMPLE_PDF,
+    SERVICE_SEND_TEST_INVOICE,
     STORAGE_KEY,
     STORAGE_VERSION,
 )
@@ -59,11 +67,20 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _handle_send_invoice(call: ServiceCall) -> None:
         await _async_send_invoice(hass, entry, call)
 
+    async def _handle_send_test_invoice(call: ServiceCall) -> None:
+        await _async_send_invoice(hass, entry, call, test_mode=True)
+
+    async def _handle_send_sample_pdf(call: ServiceCall) -> None:
+        await _async_send_sample_pdf(hass, entry, call)
+
     hass.services.async_register(
-        DOMAIN,
-        SERVICE_SEND_INVOICE,
-        _handle_send_invoice,
-        schema=vol.Schema({}),
+        DOMAIN, SERVICE_SEND_INVOICE, _handle_send_invoice, schema=vol.Schema({})
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_SEND_TEST_INVOICE, _handle_send_test_invoice, schema=vol.Schema({})
+    )
+    hass.services.async_register(
+        DOMAIN, SERVICE_SEND_SAMPLE_PDF, _handle_send_sample_pdf, schema=vol.Schema({})
     )
 
     return True
@@ -83,10 +100,107 @@ async def _async_update_listener(hass: HomeAssistant, entry: ConfigEntry) -> Non
     await hass.config_entries.async_reload(entry.entry_id)
 
 
+async def _async_fetch_daily_stats(
+    hass: HomeAssistant,
+    sensor_id: str,
+    start_date: datetime.date,
+    end_date: datetime.date,
+    hour: int = 0,
+) -> list[tuple[datetime.date, float]]:
+    """Tagesverbrauch aus HA Recorder-Statistiken (stündliche Auflösung).
+
+    Für jeden Kalendertag von start_date bis end_date wird der Verbrauch
+    als Differenz der Recorder-Summe zwischen aufeinanderfolgenden Tagen
+    bei der konfigurierten Stunde berechnet.
+    Fehlen Datenpunkte, wird 0.0 zurückgegeben.
+    """
+    try:
+        from homeassistant.components.recorder import get_instance  # noqa: PLC0415
+        from homeassistant.components.recorder.statistics import (  # noqa: PLC0415
+            statistics_during_period,
+        )
+        from homeassistant.const import UnitOfEnergy  # noqa: PLC0415
+    except ImportError:
+        _LOGGER.warning("Recorder nicht verfügbar – Tagesübersicht übersprungen")
+        return []
+
+    # Wir brauchen Datenpunkte von (start_date - 1 Tag) bis (end_date + 1 Tag)
+    # um für start_date und end_date jeweils Differenzen bilden zu können
+    local_tz = dt_util.get_time_zone(hass.config.time_zone)
+    query_start = datetime.datetime.combine(
+        start_date - datetime.timedelta(days=1),
+        datetime.time(hour, 0),
+        tzinfo=local_tz,
+    )
+    query_end = datetime.datetime.combine(
+        end_date + datetime.timedelta(days=1),
+        datetime.time(hour, 0),
+        tzinfo=local_tz,
+    )
+
+    try:
+        recorder = get_instance(hass)
+        stats = await recorder.async_add_executor_job(
+            statistics_during_period,
+            hass,
+            query_start,
+            query_end,
+            {sensor_id},
+            "hour",
+            {UnitOfEnergy.KILO_WATT_HOUR: UnitOfEnergy.KILO_WATT_HOUR},
+            {"sum"},
+        )
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("Recorder-Abfrage fehlgeschlagen: %s", exc)
+        return []
+
+    if not stats or sensor_id not in stats:
+        _LOGGER.debug("Keine Statistiken für Sensor %s gefunden", sensor_id)
+        return []
+
+    # Dict: timezone-aware datetime → sum_value
+    sum_by_dt: dict[datetime.datetime, float] = {}
+    for entry in stats[sensor_id]:
+        ts = entry.get("start")
+        val = entry.get("sum")
+        if ts is not None and val is not None:
+            sum_by_dt[ts] = float(val)
+
+    # Für jeden Tag: Differenz der Summe bei Stunde H zwischen zwei aufeinanderfolgenden Tagen
+    result: list[tuple[datetime.date, float]] = []
+    current = start_date
+    while current <= end_date:
+        dt_this = datetime.datetime.combine(current, datetime.time(hour, 0), tzinfo=local_tz)
+        dt_next = datetime.datetime.combine(
+            current + datetime.timedelta(days=1), datetime.time(hour, 0), tzinfo=local_tz
+        )
+
+        sum_this = sum_by_dt.get(dt_this)
+        sum_next = sum_by_dt.get(dt_next)
+
+        if sum_this is not None and sum_next is not None:
+            consumption = max(0.0, sum_next - sum_this)
+        else:
+            consumption = 0.0
+
+        result.append((current, consumption))
+        current += datetime.timedelta(days=1)
+
+    return result
+
+
 async def _async_send_invoice(
-    hass: HomeAssistant, entry: ConfigEntry, call: ServiceCall
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    call: ServiceCall,
+    *,
+    test_mode: bool = False,
 ) -> None:
-    """Generate PDF invoice and send via SMTP."""
+    """Generate PDF invoice and send via SMTP.
+
+    Im test_mode werden KEINE gespeicherten Werte (last_reading, last_datetime etc.)
+    verändert und kein Event gefeuert.
+    """
     data = hass.data[DOMAIN][entry.entry_id]
     cfg = data["config"]
     stored = data["stored"]
@@ -103,14 +217,16 @@ async def _async_send_invoice(
         _LOGGER.error("Ungültiger Sensorwert: %s", state.state)
         return
 
-    # Load last billing data from persistent storage
+    # Letzten Abrechnungsstand aus Speicher laden
     last_reading = stored.get("last_reading")
     last_date_str = stored.get("last_date")
+    last_datetime_str = stored.get("last_datetime")
 
     today = datetime.date.today()
+    now = datetime.datetime.now()
 
     if last_reading is None:
-        # First invoice: use the initial values entered during setup
+        # Erste Abrechnung: Startwerte aus Konfiguration
         last_reading = float(cfg.get(CONF_INITIAL_READING, 0.0))
         initial_date_str = cfg.get(CONF_INITIAL_DATE)
         last_date = (
@@ -118,6 +234,7 @@ async def _async_send_invoice(
             if initial_date_str
             else today.replace(day=1)
         )
+        start_datetime = datetime.datetime.combine(last_date, datetime.time(0, 0))
         _LOGGER.info(
             "Erste Abrechnung – verwende Startwert aus Konfiguration: %.3f kWh ab %s",
             last_reading,
@@ -129,16 +246,27 @@ async def _async_send_invoice(
             if last_date_str
             else today.replace(day=1)
         )
+        if last_datetime_str:
+            start_datetime = datetime.datetime.fromisoformat(last_datetime_str)
+        else:
+            start_datetime = datetime.datetime.combine(last_date, datetime.time(0, 0))
 
     owner_name = cfg[CONF_OWNER_NAME]
     meter_number = cfg[CONF_METER_NUMBER]
     recipient_email = cfg[CONF_RECIPIENT_EMAIL]
     price_per_kwh = float(cfg[CONF_PRICE_PER_KWH])
 
-    # Lazy import so the package loads even if fpdf2 isn't installed yet
+    # Tagesstatistiken aus Recorder holen (wenn Option aktiv)
+    daily_data = None
+    if cfg.get(CONF_INCLUDE_DAILY_STATS, DEFAULT_INCLUDE_DAILY_STATS):
+        stats_hour = int(cfg.get(CONF_DAILY_STATS_HOUR, DEFAULT_DAILY_STATS_HOUR))
+        daily_data = await _async_fetch_daily_stats(
+            hass, sensor_id, last_date, today, stats_hour
+        )
+
+    # Lazy import (fpdf2 wird erst beim ersten Start installiert)
     from .pdf_generator import generate_invoice_pdf  # noqa: PLC0415
 
-    # Generate PDF in executor (fpdf2 is sync)
     pdf_bytes = await hass.async_add_executor_job(
         generate_invoice_pdf,
         owner_name,
@@ -149,12 +277,13 @@ async def _async_send_invoice(
         last_reading,
         current_reading,
         price_per_kwh,
+        start_datetime,
+        daily_data,
     )
 
-    period_label = f"{last_date.strftime('%Y-%m')}"
+    period_label = last_date.strftime("%Y-%m")
     filename = f"Wallbox_Abrechnung_{period_label}.pdf"
 
-    # Send email in executor
     smtp_cfg = {
         "host": cfg[CONF_SMTP_HOST],
         "port": int(cfg[CONF_SMTP_PORT]),
@@ -167,12 +296,14 @@ async def _async_send_invoice(
 
     consumption = current_reading - last_reading
     total_cost = consumption * price_per_kwh
+    test_prefix = "TEST: " if test_mode else ""
     subject = (
-        f"Wallbox Ladekosten {last_date.strftime('%B %Y')} – "
+        f"{test_prefix}Wallbox Ladekosten {last_date.strftime('%B %Y')} – "
         f"{total_cost:.2f} €"
     )
     body = (
         f"<p>Guten Tag,</p>"
+        f"{('<p><strong style=\"color:#cc0000\">[TEST-E-Mail – keine Werte wurden gespeichert]</strong></p>' if test_mode else '')}"
         f"<p>anbei finden Sie die Erstattungsanforderung für die Ladekosten "
         f"des Dienstfahrzeuges an der privaten Wallbox.</p>"
         f"<table style='border-collapse:collapse;font-family:sans-serif'>"
@@ -198,19 +329,116 @@ async def _async_send_invoice(
         _LOGGER.error("E-Mail-Versand fehlgeschlagen: %s", exc)
         return
 
-    # Persist new billing state
+    if test_mode:
+        _LOGGER.info(
+            "Test-Abrechnung gesendet (keine Werte geändert): %.3f kWh, %.2f €",
+            consumption,
+            total_cost,
+        )
+        return
+
+    # Persistenten Zustand nur bei echter Abrechnung speichern
     stored["last_reading"] = current_reading
     stored["last_date"] = today.isoformat()
+    stored["last_datetime"] = now.isoformat()
     data["stored"] = stored
     await data["store"].async_save(stored)
 
-    # Signal sensors to update
     hass.bus.async_fire(f"{DOMAIN}_invoice_sent", {"entry_id": entry.entry_id})
     _LOGGER.info(
         "Wallbox-Abrechnung erfolgreich gesendet: %.3f kWh, %.2f €",
         consumption,
         total_cost,
     )
+
+
+async def _async_send_sample_pdf(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    call: ServiceCall,
+) -> None:
+    """Generiert eine Beispiel-PDF mit Dummy-Daten und sendet sie per E-Mail."""
+    data = hass.data[DOMAIN][entry.entry_id]
+    cfg = data["config"]
+
+    today = datetime.date.today()
+    period_from = today.replace(day=1)
+    price_per_kwh = float(cfg[CONF_PRICE_PER_KWH])
+
+    # Dummy-Werte
+    owner_name = "Max Mustermann (Beispiel)"
+    meter_number = "WB-BEISPIEL-001"
+    reading_prev = 1000.0
+    reading_curr = 1234.567
+    start_datetime = datetime.datetime.combine(period_from, datetime.time(8, 0))
+
+    # Dummy-Tagesdaten: Verbrauch gleichmäßig auf die Tage verteilt, leicht variiert
+    num_days = (today - period_from).days + 1
+    total_consumption = reading_curr - reading_prev
+    base_per_day = total_consumption / max(num_days, 1)
+    rng = random.Random(42)
+    raw = [max(0.0, base_per_day + rng.uniform(-base_per_day * 0.4, base_per_day * 0.4)) for _ in range(num_days)]
+    # Normieren damit die Summe passt
+    raw_sum = sum(raw) or 1.0
+    daily_data = [
+        (period_from + datetime.timedelta(days=i), round(v / raw_sum * total_consumption, 3))
+        for i, v in enumerate(raw)
+    ]
+
+    from .pdf_generator import generate_invoice_pdf  # noqa: PLC0415
+
+    pdf_bytes = await hass.async_add_executor_job(
+        generate_invoice_pdf,
+        owner_name,
+        meter_number,
+        cfg[CONF_RECIPIENT_EMAIL],
+        period_from,
+        today,
+        reading_prev,
+        reading_curr,
+        price_per_kwh,
+        start_datetime,
+        daily_data,
+    )
+
+    recipient_email = cfg[CONF_RECIPIENT_EMAIL]
+    filename = f"Wallbox_Beispiel_{today.strftime('%Y-%m')}.pdf"
+    smtp_cfg = {
+        "host": cfg[CONF_SMTP_HOST],
+        "port": int(cfg[CONF_SMTP_PORT]),
+        "username": cfg.get(CONF_SMTP_USERNAME, ""),
+        "password": cfg.get(CONF_SMTP_PASSWORD, ""),
+        "from_email": cfg[CONF_SMTP_FROM_EMAIL],
+        "use_tls": cfg.get(CONF_SMTP_USE_TLS, True),
+        "use_ssl": cfg.get(CONF_SMTP_USE_SSL, False),
+    }
+    consumption = reading_curr - reading_prev
+    total_cost = consumption * price_per_kwh
+    subject = f"Wallbox Abrechnung – Beispiel-PDF ({today.strftime('%B %Y')})"
+    body = (
+        f"<p>Guten Tag,</p>"
+        f"<p><strong>[BEISPIEL-PDF – enthält keine echten Werte]</strong></p>"
+        f"<p>Anbei finden Sie eine Beispiel-Abrechnung zur Ansicht der PDF-Vorlage.</p>"
+        f"<table style='border-collapse:collapse;font-family:sans-serif'>"
+        f"<tr><td style='padding:4px 12px'>Zeitraum:</td>"
+        f"<td style='padding:4px 12px'>{period_from.strftime('%d.%m.%Y')} – {today.strftime('%d.%m.%Y')}</td></tr>"
+        f"<tr><td style='padding:4px 12px'>Verbrauch (Beispiel):</td>"
+        f"<td style='padding:4px 12px'>{consumption:.3f} kWh</td></tr>"
+        f"<tr><td style='padding:4px 12px'><strong>Betrag (Beispiel):</strong></td>"
+        f"<td style='padding:4px 12px'><strong>{total_cost:.2f} €</strong></td></tr>"
+        f"</table>"
+        f"<p>Mit freundlichen Grüßen,<br/>{owner_name}</p>"
+    )
+
+    try:
+        await hass.async_add_executor_job(
+            _send_email_sync, smtp_cfg, recipient_email, subject, body, pdf_bytes, filename
+        )
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.error("Beispiel-PDF-Versand fehlgeschlagen: %s", exc)
+        return
+
+    _LOGGER.info("Beispiel-PDF erfolgreich gesendet an %s", recipient_email)
 
 
 def _send_email_sync(

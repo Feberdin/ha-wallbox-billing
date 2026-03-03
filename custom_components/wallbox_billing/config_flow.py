@@ -13,7 +13,9 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import selector
 
 from .const import (
+    CONF_DAILY_STATS_HOUR,
     CONF_ENERGY_SENSOR,
+    CONF_INCLUDE_DAILY_STATS,
     CONF_INITIAL_DATE,
     CONF_INITIAL_READING,
     CONF_METER_NUMBER,
@@ -27,6 +29,8 @@ from .const import (
     CONF_SMTP_USE_SSL,
     CONF_SMTP_USE_TLS,
     CONF_SMTP_USERNAME,
+    DEFAULT_DAILY_STATS_HOUR,
+    DEFAULT_INCLUDE_DAILY_STATS,
     DEFAULT_PRICE_PER_KWH,
     DEFAULT_SMTP_PORT,
     DEFAULT_SMTP_USE_SSL,
@@ -222,6 +226,21 @@ class WallboxBillingOptionsFlow(config_entries.OptionsFlow):
                     CONF_SMTP_USE_SSL,
                     default=cfg.get(CONF_SMTP_USE_SSL, DEFAULT_SMTP_USE_SSL),
                 ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_INCLUDE_DAILY_STATS,
+                    default=cfg.get(CONF_INCLUDE_DAILY_STATS, DEFAULT_INCLUDE_DAILY_STATS),
+                ): selector.BooleanSelector(),
+                vol.Required(
+                    CONF_DAILY_STATS_HOUR,
+                    default=int(cfg.get(CONF_DAILY_STATS_HOUR, DEFAULT_DAILY_STATS_HOUR)),
+                ): selector.NumberSelector(
+                    selector.NumberSelectorConfig(
+                        min=0,
+                        max=23,
+                        step=1,
+                        mode=selector.NumberSelectorMode.BOX,
+                    )
+                ),
             }
         )
 

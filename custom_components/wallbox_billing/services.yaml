@@ -5,3 +5,19 @@ send_invoice:
     sendet sie per E-Mail. Anschließend wird der aktuelle Zählerstand als
     neuer Startwert gespeichert.
   fields: {}
+
+send_test_invoice:
+  name: Wallbox Test-Rechnung senden
+  description: >
+    Erstellt eine PDF-Rechnung mit den aktuellen echten Werten und sendet sie
+    per E-Mail (Subject-Prefix "TEST:"). Zählerstand, Datum und alle anderen
+    gespeicherten Werte werden dabei NICHT verändert.
+  fields: {}
+
+send_sample_pdf:
+  name: Wallbox Beispiel-PDF senden
+  description: >
+    Erstellt eine Beispiel-PDF mit Dummy-Daten und sendet sie an die
+    konfigurierte E-Mail-Adresse. Nützlich zum Prüfen des PDF-Layouts und
+    der E-Mail-Zustellung. Es werden keine echten Werte verwendet.
+  fields: {}
