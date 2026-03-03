@@ -1,0 +1,13 @@
+# Claude Code lokale Konfiguration
+.claude/
+
+# Bedienungsanleitungen / Datenblätter (binäre PDFs gehören nicht ins Repo)
+*.pdf
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# macOS
+.DS_Store
