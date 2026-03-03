@@ -38,3 +38,15 @@ ENTITY_COST = "cost_since_last_billing"
 ENTITY_LAST_BILLING_DATE = "last_billing_date"
 ENTITY_LAST_BILLING_READING = "last_billing_reading"
 ENTITY_SEND_INVOICE = "send_invoice"
+ENTITY_TEST_INVOICE = "test_invoice"
+ENTITY_SAMPLE_PDF = "sample_pdf"
+
+# Daily stats options
+CONF_INCLUDE_DAILY_STATS = "include_daily_stats"
+CONF_DAILY_STATS_HOUR = "daily_stats_hour"
+DEFAULT_INCLUDE_DAILY_STATS = True
+DEFAULT_DAILY_STATS_HOUR = 0
+
+# Additional services
+SERVICE_SEND_TEST_INVOICE = "send_test_invoice"
+SERVICE_SEND_SAMPLE_PDF = "send_sample_pdf"

@@ -51,7 +51,13 @@
           "smtp_username": "SMTP username",
           "smtp_password": "SMTP password",
           "smtp_use_tls": "STARTTLS",
-          "smtp_use_ssl": "SSL/TLS"
+          "smtp_use_ssl": "SSL/TLS",
+          "include_daily_stats": "Append daily overview to PDF",
+          "daily_stats_hour": "Recorder read time (hour, 0–23)"
+        },
+        "data_description": {
+          "include_daily_stats": "Adds a second PDF page with daily consumption and costs from the HA recorder.",
+          "daily_stats_hour": "Hour (0 = midnight) at which the daily meter reading is taken from the recorder. Default: 0 (midnight)."
         }
       }
     }
