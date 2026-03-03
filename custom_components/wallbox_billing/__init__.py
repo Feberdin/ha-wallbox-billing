@@ -20,6 +20,7 @@ from .const import (
     CONF_DAILY_STATS_HOUR,
     CONF_ENERGY_SENSOR,
     CONF_INCLUDE_DAILY_STATS,
+    CONF_STATS_SENSOR,
     CONF_INITIAL_DATE,
     CONF_INITIAL_READING,
     CONF_METER_NUMBER,
@@ -105,36 +106,37 @@ async def _async_fetch_daily_stats(
     sensor_id: str,
     start_date: datetime.date,
     end_date: datetime.date,
-    hour: int = 0,
+    hour: int = 0,  # reserviert für Kompatibilität, wird bei period="day" nicht genutzt
 ) -> list[tuple[datetime.date, float]]:
-    """Tagesverbrauch aus HA Recorder-Statistiken (stündliche Auflösung).
+    """Tagesverbrauch aus HA Recorder-Statistiken (Tagesauflösung).
 
-    Für jeden Kalendertag von start_date bis end_date wird der Verbrauch
-    als Differenz der Recorder-Summe zwischen aufeinanderfolgenden Tagen
-    bei der konfigurierten Stunde berechnet.
-    Fehlen Datenpunkte, wird 0.0 zurückgegeben.
+    Nutzt period="day" für maximale Kompatibilität mit HA 2023+.
+    In HA 2023.3+ gibt statistics_during_period 'start' als float (Unix-Timestamp)
+    zurück – kein datetime-Objekt. Beide Formate werden korrekt behandelt.
+
+    Gibt für jeden Kalendertag von start_date bis end_date ein (date, kwh)-Tupel zurück.
+    Fehlen Datenpunkte für einen Tag, wird 0.0 verwendet.
     """
     try:
         from homeassistant.components.recorder import get_instance  # noqa: PLC0415
         from homeassistant.components.recorder.statistics import (  # noqa: PLC0415
             statistics_during_period,
         )
-        from homeassistant.const import UnitOfEnergy  # noqa: PLC0415
     except ImportError:
         _LOGGER.warning("Recorder nicht verfügbar – Tagesübersicht übersprungen")
         return []
 
-    # Wir brauchen Datenpunkte von (start_date - 1 Tag) bis (end_date + 1 Tag)
-    # um für start_date und end_date jeweils Differenzen bilden zu können
     local_tz = dt_util.get_time_zone(hass.config.time_zone)
+
+    # Einen Tag vor start_date benötigen wir, um die Differenz für start_date zu berechnen
     query_start = datetime.datetime.combine(
         start_date - datetime.timedelta(days=1),
-        datetime.time(hour, 0),
+        datetime.time(0, 0),
         tzinfo=local_tz,
     )
     query_end = datetime.datetime.combine(
         end_date + datetime.timedelta(days=1),
-        datetime.time(hour, 0),
+        datetime.time(0, 0),
         tzinfo=local_tz,
     )
 
@@ -146,8 +148,8 @@ async def _async_fetch_daily_stats(
             query_start,
             query_end,
             {sensor_id},
-            "hour",
-            {UnitOfEnergy.KILO_WATT_HOUR: UnitOfEnergy.KILO_WATT_HOUR},
+            "day",
+            None,   # keine Einheitenumrechnung – Sensor liefert bereits kWh
             {"sum"},
         )
     except Exception as exc:  # noqa: BLE001
@@ -158,32 +160,53 @@ async def _async_fetch_daily_stats(
         _LOGGER.debug("Keine Statistiken für Sensor %s gefunden", sensor_id)
         return []
 
-    # Dict: timezone-aware datetime → sum_value
-    sum_by_dt: dict[datetime.datetime, float] = {}
+    # Dict: lokales Datum → kumulativer Summenwert
+    # HA 2023.3+: entry["start"] ist float (Unix-Timestamp)
+    # ältere HA:  entry["start"] ist datetime-Objekt
+    sum_by_date: dict[datetime.date, float] = {}
     for entry in stats[sensor_id]:
-        ts = entry.get("start")
-        val = entry.get("sum")
-        if ts is not None and val is not None:
-            sum_by_dt[ts] = float(val)
+        # Attributzugriff funktioniert sowohl für dict als auch für TypedDict/dataclass
+        ts_raw = entry.get("start") if isinstance(entry, dict) else getattr(entry, "start", None)
+        val = entry.get("sum") if isinstance(entry, dict) else getattr(entry, "sum", None)
 
-    # Für jeden Tag: Differenz der Summe bei Stunde H zwischen zwei aufeinanderfolgenden Tagen
+        if ts_raw is None or val is None:
+            continue
+
+        # Timestamp in lokales Datum konvertieren (HA 2023+: float, ältere: datetime)
+        if isinstance(ts_raw, (int, float)):
+            dt_local = datetime.datetime.fromtimestamp(float(ts_raw), tz=local_tz)
+        elif isinstance(ts_raw, datetime.datetime):
+            tz = ts_raw.tzinfo or datetime.timezone.utc
+            dt_local = ts_raw.replace(tzinfo=tz).astimezone(local_tz)
+        else:
+            continue
+
+        sum_by_date[dt_local.date()] = float(val)
+
+    _LOGGER.debug(
+        "Recorder Tagessummen für %s: %d Einträge (%s bis %s)",
+        sensor_id,
+        len(sum_by_date),
+        min(sum_by_date, default="–"),
+        max(sum_by_date, default="–"),
+    )
+
+    # Tagesverbrauch = Differenz aufeinanderfolgender Tagessummen
     result: list[tuple[datetime.date, float]] = []
+    prev_date = start_date - datetime.timedelta(days=1)
     current = start_date
     while current <= end_date:
-        dt_this = datetime.datetime.combine(current, datetime.time(hour, 0), tzinfo=local_tz)
-        dt_next = datetime.datetime.combine(
-            current + datetime.timedelta(days=1), datetime.time(hour, 0), tzinfo=local_tz
-        )
+        sum_prev = sum_by_date.get(prev_date)
+        sum_curr = sum_by_date.get(current)
 
-        sum_this = sum_by_dt.get(dt_this)
-        sum_next = sum_by_dt.get(dt_next)
-
-        if sum_this is not None and sum_next is not None:
-            consumption = max(0.0, sum_next - sum_this)
+        if sum_prev is not None and sum_curr is not None:
+            consumption = max(0.0, sum_curr - sum_prev)
         else:
+            _LOGGER.debug("Keine Recorder-Daten für %s (prev=%s, curr=%s)", current, sum_prev, sum_curr)
             consumption = 0.0
 
         result.append((current, consumption))
+        prev_date = current
         current += datetime.timedelta(days=1)
 
     return result
@@ -257,11 +280,13 @@ async def _async_send_invoice(
     price_per_kwh = float(cfg[CONF_PRICE_PER_KWH])
 
     # Tagesstatistiken aus Recorder holen (wenn Option aktiv)
+    # Optionaler separater Statistik-Sensor; Fallback auf Haupt-Energiesensor
     daily_data = None
     if cfg.get(CONF_INCLUDE_DAILY_STATS, DEFAULT_INCLUDE_DAILY_STATS):
+        stats_sensor_id = cfg.get(CONF_STATS_SENSOR) or sensor_id
         stats_hour = int(cfg.get(CONF_DAILY_STATS_HOUR, DEFAULT_DAILY_STATS_HOUR))
         daily_data = await _async_fetch_daily_stats(
-            hass, sensor_id, last_date, today, stats_hour
+            hass, stats_sensor_id, last_date, today, stats_hour
         )
 
     # Lazy import (fpdf2 wird erst beim ersten Start installiert)

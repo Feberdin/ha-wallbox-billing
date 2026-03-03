@@ -53,11 +53,13 @@
           "smtp_use_tls": "STARTTLS",
           "smtp_use_ssl": "SSL/TLS",
           "include_daily_stats": "Tagesübersicht im PDF anhängen",
-          "daily_stats_hour": "Ablesezeit Recorder (Stunde, 0–23)"
+          "stats_sensor": "Statistik-Sensor für Tagesübersicht (optional)",
+          "daily_stats_hour": "Recorder-Ablesezeit (Stunde, 0–23)"
         },
         "data_description": {
           "include_daily_stats": "Fügt eine zweite PDF-Seite mit täglichem Verbrauch und Kosten aus dem HA Recorder hinzu.",
-          "daily_stats_hour": "Uhrzeit (0 = 00:00 Uhr Mitternacht), zu der täglich der Zählerstand aus dem Recorder abgelesen wird. Standard: 0 (Mitternacht)."
+          "stats_sensor": "Optionaler separater Sensor für die Recorder-Statistiken. Leer lassen, um den Haupt-Energiesensor zu verwenden.",
+          "daily_stats_hour": "Reserviert – wird aktuell nicht verwendet (Tageswerte basieren auf Kalendertagen)."
         }
       }
     }
