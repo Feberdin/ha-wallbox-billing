@@ -16,6 +16,7 @@ from .const import (
     CONF_DAILY_STATS_HOUR,
     CONF_ENERGY_SENSOR,
     CONF_INCLUDE_DAILY_STATS,
+    CONF_STATS_SENSOR,
     CONF_INITIAL_DATE,
     CONF_INITIAL_READING,
     CONF_METER_NUMBER,
@@ -230,6 +231,15 @@ class WallboxBillingOptionsFlow(config_entries.OptionsFlow):
                     CONF_INCLUDE_DAILY_STATS,
                     default=cfg.get(CONF_INCLUDE_DAILY_STATS, DEFAULT_INCLUDE_DAILY_STATS),
                 ): selector.BooleanSelector(),
+                vol.Optional(
+                    CONF_STATS_SENSOR,
+                    default=cfg.get(CONF_STATS_SENSOR, ""),
+                ): selector.EntitySelector(
+                    selector.EntitySelectorConfig(
+                        domain="sensor",
+                        device_class=SensorDeviceClass.ENERGY,
+                    )
+                ),
                 vol.Required(
                     CONF_DAILY_STATS_HOUR,
                     default=int(cfg.get(CONF_DAILY_STATS_HOUR, DEFAULT_DAILY_STATS_HOUR)),

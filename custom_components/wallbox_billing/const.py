@@ -44,6 +44,7 @@ ENTITY_SAMPLE_PDF = "sample_pdf"
 # Daily stats options
 CONF_INCLUDE_DAILY_STATS = "include_daily_stats"
 CONF_DAILY_STATS_HOUR = "daily_stats_hour"
+CONF_STATS_SENSOR = "stats_sensor"      # optionaler separater Sensor für Recorder-Statistiken
 DEFAULT_INCLUDE_DAILY_STATS = True
 DEFAULT_DAILY_STATS_HOUR = 0
 

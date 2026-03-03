@@ -60,6 +60,8 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 
 Der **Eltako DSZ15D-3x80A** ist ein MID-geeichter Drehstromzähler mit S0-Schnittstelle, ideal für die Erfassung von Wallbox-Ladeenergie.
 
+📄 **[Bedienungsanleitung & Datenblatt (PDF, Eltako)](https://www.eltako.com/fileadmin/downloads/de/_bedienung/DSZ15D-3x80A_28380015-1_dt.pdf)**
+
 #### Technische Daten (aus Datenblatt)
 
 | Eigenschaft | Wert |
