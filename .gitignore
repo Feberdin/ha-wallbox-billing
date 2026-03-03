@@ -6,6 +6,7 @@ PROJEKT_KONTEXT.md
 
 # Bedienungsanleitungen / Datenblätter (binäre PDFs gehören nicht ins Repo)
 *.pdf
+!docs/examples/Beispiel-WallboxAbrechnung-mit-Tagesausgabe.pdf
 
 # Python
 __pycache__/
