@@ -14,6 +14,7 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 ## Inhaltsverzeichnis
 
 - [Features](#features)
+- [Beispielausgabe](#beispielausgabe)
 - [Hardware](#hardware)
   - [Eltako DSZ15D Energiezähler](#eltako-dsz15d-energiezähler)
   - [ESP32 Mikrocontroller](#esp32-mikrocontroller)
@@ -48,6 +49,16 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 - **4 Sensoren** für aktuellen Verbrauch, Kosten, letztes Abrechnungsdatum und Zählerstand
 - Alle Einstellungen jederzeit über die HA-Oberfläche änderbar
 - Persistente Speicherung des letzten Zählerstandes über HA-Neustarts hinweg
+
+---
+
+## Beispielausgabe
+
+Eine echte Beispielausgabe (inkl. Tagesübersicht auf Seite 2) findest du hier:
+
+- [Beispiel-WallboxAbrechnung-mit-Tagesausgabe.pdf](docs/examples/Beispiel-WallboxAbrechnung-mit-Tagesausgabe.pdf)
+
+Die Ausgabe ist repräsentativ für den Versand über den Button **„Beispiel-PDF senden“**.
 
 ---
 
