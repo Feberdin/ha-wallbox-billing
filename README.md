@@ -1,6 +1,6 @@
 # Wallbox Abrechnung
 
-[![Version](https://img.shields.io/badge/version-1.0.4-blue.svg)](https://github.com/Feberdin/ha-wallbox-billing/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/Feberdin/ha-wallbox-billing/releases)
 [![HACS](https://img.shields.io/badge/HACS-Custom-orange.svg)](https://hacs.xyz)
 [![HA](https://img.shields.io/badge/Home%20Assistant-2024.1%2B-brightgreen.svg)](https://www.home-assistant.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
@@ -15,6 +15,9 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 
 - [Features](#features)
 - [Hardware](#hardware)
+  - [Eltako DSZ15D Energiezähler](#eltako-dsz15d-energiezähler)
+  - [ESP32 Mikrocontroller](#esp32-mikrocontroller)
+  - [Verdrahtung S0-Schnittstelle](#verdrahtung-s0-schnittstelle)
 - [Installation](#installation)
 - [Einrichtung](#einrichtung)
 - [E-Mail-Konfiguration](#e-mail-konfiguration)
@@ -23,7 +26,7 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 - [Automationen](#automationen)
   - [Monatlicher automatischer Versand](#monatlicher-automatischer-versand)
   - [Benachrichtigung nach Versand](#benachrichtigung-nach-versand)
-- [Button & manueller Versand](#button--manueller-versand)
+- [Buttons & manueller Versand](#buttons--manueller-versand)
 - [Sensoren](#sensoren)
 - [Einstellungen nachträglich ändern](#einstellungen-nachträglich-ändern)
 - [ESPHome-Firmware](#esphome-firmware)
@@ -34,13 +37,14 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 
 - **PDF-Rechnung** auf Knopfdruck oder per Automation mit:
   - Name, Zählernummer, Abrechnungszeitraum
-  - Zählerstand zu Beginn und Ende des Zeitraums
+  - Zählerstand zu Beginn und Ende des Zeitraums (mit exakter Uhrzeit)
   - Verbrauch in kWh
   - Strompreis je kWh
   - Gesamtbetrag in EUR
+  - **Optionale 2. Seite** mit Tagesübersicht (kWh und EUR pro Tag, Plausibilitätsprüfung)
 - Versand per **E-Mail** (SMTP) mit PDF als Anhang und HTML-Zusammenfassung im E-Mail-Text
 - **Monatliche Automation** möglich (Service `wallbox_billing.send_invoice`)
-- **Manueller Button** für sofortigen Versand
+- **3 Buttons**: Abrechnung senden, Test-Rechnung (kein State-Update), Beispiel-PDF
 - **4 Sensoren** für aktuellen Verbrauch, Kosten, letztes Abrechnungsdatum und Zählerstand
 - Alle Einstellungen jederzeit über die HA-Oberfläche änderbar
 - Persistente Speicherung des letzten Zählerstandes über HA-Neustarts hinweg
@@ -49,13 +53,88 @@ Die Integration erstellt ein professionelles **PDF-Dokument** mit allen relevant
 
 ## Hardware
 
-Diese Integration wurde entwickelt für:
+### Eltako DSZ15D Energiezähler
 
-- **ESP32** (esp32dev) mit [ESPHome](https://esphome.io)
-- **Eltako DSZ15D** Energiezähler
-- Verbindung über **S0-Schnittstelle** an GPIO14 (1000 Impulse/kWh)
+> 🛒 **Bei Amazon kaufen:** [Eltako DSZ15D-3x80A Drehstromzähler](https://amzn.to/46B2tcv)
+> *(Affiliate-Link – beim Kauf über diesen Link unterstützt du das Projekt ohne Mehrkosten)*
 
-Die ESPHome-Konfiguration liegt unter [`esphome/wallbox.yaml`](esphome/wallbox.yaml).
+Der **Eltako DSZ15D-3x80A** ist ein MID-geeichter Drehstromzähler mit S0-Schnittstelle, ideal für die Erfassung von Wallbox-Ladeenergie.
+
+#### Technische Daten (aus Datenblatt)
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Betriebsspannung | 3×230/400 V, 50 Hz |
+| Maximalstrom | 3×80 A |
+| Referenzstrom I_ref | 3×0,5–10 (80) A |
+| Anlaufstrom | 40 mA |
+| Genauigkeitsklasse | B (±1 %) |
+| Eigenverbrauch | 0,5 W je Pfad |
+| Anzeige | LC-Display, 7 Stellen |
+| Betriebstemperatur | −25 °C bis +55 °C |
+| Schutzart | IP50 (Einbau in IP51-Schrank) |
+| Abmessungen | 4 TE = 70 mm breit, 58 mm tief (DIN-EN 60715 TH35) |
+| MID-geeicht | ✅ (EG-Baumusterprüfbescheinigung 0120/SGS0204) |
+
+#### S0-Schnittstelle
+
+| Eigenschaft | Wert |
+|-------------|------|
+| Norm | DIN EN 62053-31 |
+| Ausführung | Potenzialfrei (Optokoppler) |
+| Spannung | min. 5 V DC, max. 30 V DC |
+| Strom | max. 20 mA |
+| Impedanz | 100 Ω |
+| Impulslänge | 30 ms |
+| **Impulse** | **1.000 Imp./kWh** |
+| Klemmen | SO+ und SO− |
+
+#### Anschlussplan (4-Leiter 3×230/400 V)
+
+```
+          SO-Ausgang
+           +    −
+           |    |
+ N   E1  E2  SO+ SO−
+ |    |    |    |    |
+ └────┴────┴────┴────┘   (Oberklemmen)
+      [  DSZ15D Display  ]
+
+ ↑L1  ↓L1  ↑L2  ↓L2  ↑L3  ↓L3
+  |    |    |    |    |    |
+ L1───────  L2───────  L3───────
+```
+
+> **Wichtig:** Installation nur durch eine Elektrofachkraft! Falsche Verdrahtung kann zu Brandgefahr oder elektrischen Schlägen führen.
+
+Die SO+ und SO−-Klemmen werden mit dem ESP32 (GPIO14) verbunden – entweder direkt oder über einen Pull-up-Widerstand (je nach Spannungspegel).
+
+---
+
+### ESP32 Mikrocontroller
+
+> 🛒 **Bei Amazon kaufen:** [ESP32 Entwicklungsboard](https://amzn.to/4cpUNO0)
+> *(Affiliate-Link – beim Kauf über diesen Link unterstützt du das Projekt ohne Mehrkosten)*
+
+Als Mikrocontroller wird ein handelsübliches **ESP32-Entwicklungsboard** (esp32dev) mit [ESPHome](https://esphome.io) verwendet. Der ESP32 zählt die S0-Impulse des DSZ15D, integriert den Energieverbrauch und stellt den Zählerstand als Sensor in Home Assistant bereit.
+
+---
+
+### Verdrahtung S0-Schnittstelle
+
+Eine ausführliche Anleitung zur Verdrahtung des S0-Ausgangs eines Stromzählers an einen ESP-Mikrocontroller (inkl. Schaltplan und ESPHome-Konfiguration) findest du hier:
+
+📖 **[S0-Pulse eines Stromzählers zählen – simon42 Community](https://community.simon42.com/t/s0-pulse-eines-stromzaehlers-zaehlen-konfigruation-esp8266/13508)**
+
+**Kurzübersicht der Verbindung:**
+
+| DSZ15D Klemme | ESP32 Pin | Hinweis |
+|---------------|-----------|---------|
+| SO+ | 3,3 V oder GPIO (mit Pull-up) | Plusseite des Optokopplers |
+| SO− | GPIO14 | Impulseingang |
+| – | GND | Gemeinsame Masse |
+
+> Die ESPHome-Konfiguration (Pulse Counter, 1000 Imp./kWh, GPIO14) liegt im Repository unter [`esphome/wallbox.yaml`](esphome/wallbox.yaml).
 
 ---
 
@@ -234,14 +313,17 @@ mode: single
 
 ---
 
-## Button & manueller Versand
+## Buttons & manueller Versand
 
-In Home Assistant erscheint nach der Einrichtung das Gerät **„Wallbox Abrechnung"** mit:
+In Home Assistant erscheint nach der Einrichtung das Gerät **„Wallbox Abrechnung"** mit drei Buttons:
 
-- **Button „Rechnung erstellen & senden"** – erstellt sofort die PDF und versendet sie
-- 4 Sensoren mit aktuellen Abrechnungsdaten
+| Button | Funktion |
+|--------|----------|
+| **Rechnung erstellen & senden** | Erstellt die PDF mit echten aktuellen Werten und sendet sie per E-Mail. Speichert anschließend den aktuellen Zählerstand als neuen Startwert. |
+| **Test-Rechnung senden** | Erstellt und sendet die PDF mit echten Werten (Subject: „TEST: …"), **ohne** Zählerstand oder Datum zu ändern. Ideal zum Testen der E-Mail-Zustellung und des PDF-Layouts. |
+| **Beispiel-PDF senden** | Generiert eine PDF mit Dummy-Daten (Max Mustermann, fiktive Verbrauchswerte) und sendet sie an die konfigurierte E-Mail. Nützlich zur Überprüfung des PDF-Layouts ohne echte Daten. |
 
-> **Wichtig:** Nach jedem Versand (Button oder Automation) wird der aktuelle Zählerstand automatisch als neuer Startwert für den nächsten Abrechnungszeitraum gespeichert.
+> **Wichtig:** Nach dem echten Versand (Button oder Automation) wird der aktuelle Zählerstand automatisch als neuer Startwert für den nächsten Abrechnungszeitraum gespeichert. Test- und Beispiel-Buttons ändern keine Werte.
 
 ---
 
@@ -258,9 +340,16 @@ In Home Assistant erscheint nach der Einrichtung das Gerät **„Wallbox Abrechn
 
 ## Einstellungen nachträglich ändern
 
-Alle Einstellungen (Strompreis, Empfänger-E-Mail, SMTP-Daten, Name, Zählernummer) können jederzeit geändert werden:
+Alle Einstellungen (Strompreis, Empfänger-E-Mail, SMTP-Daten, Name, Zählernummer, Tagesübersicht) können jederzeit geändert werden:
 
 **Einstellungen → Integrationen → Wallbox Abrechnung → Konfigurieren**
+
+Dort sind auch die neuen Optionen für die Tagesübersicht verfügbar:
+
+| Option | Standard | Beschreibung |
+|--------|----------|-------------|
+| Tagesübersicht im PDF anhängen | **Ein** | Fügt eine 2. PDF-Seite mit Tagesverbrauch und -kosten aus dem HA Recorder hinzu |
+| Ablesezeit Recorder (Stunde) | **0** | Stunde (0–23), zu der täglich der Zählerstand aus dem Recorder abgelesen wird (0 = Mitternacht) |
 
 ---
 
@@ -275,3 +364,5 @@ In Home Assistant unter dem ESP32-Gerät → Zahl **„Wallbox Zählerstand setz
 ---
 
 *Entwickelt für Home Assistant mit ESPHome + Eltako DSZ15D über S0-Schnittstelle.*
+
+> **Affiliate-Hinweis:** Die mit 🛒 gekennzeichneten Links sind Amazon Affiliate-Links. Beim Kauf über diese Links erhalte ich eine kleine Provision ohne Mehrkosten für dich. Danke für deine Unterstützung!
