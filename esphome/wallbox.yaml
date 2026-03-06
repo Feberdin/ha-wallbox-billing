@@ -1,3 +1,24 @@
+# Zweck:
+# - Robuste Erfassung des Wallbox-Energiezaehlers (DSZ15D, 1000 Impulse/kWh)
+# - Korrekte Summenbildung auch bei WLAN-/Home-Assistant-Neustarts
+#
+# Input:
+# - S0-Impulse auf GPIO14
+# - Manuelle Korrekturwerte aus Home Assistant (set/offset Number Entities)
+#
+# Output:
+# - Sensor "Wallbox Zaehlerstand" (kWh, total_increasing)
+# - Sensor "Wallbox Leistung" (W)
+#
+# Invarianten:
+# - Gesamtstand = base_kwh + (impulse_runtime / 1000)
+# - impulse_runtime steigt monoton (außer expliziter manueller Korrektur ueber base_kwh)
+# - Persistenz-Checkpoint nur alle 50 Impulse (Flash-schonend)
+#
+# Debug:
+# - Bei Abweichungen "Wallbox Rohimpulse seit Boot" und "Wallbox Zaehlerstand" vergleichen
+# - Bei Reboot pruefen, dass "Wallbox Zaehlerstand" nach Neustart nicht zurueckspringt
+
 esphome:
   name: esp32-wallbox
   friendly_name: ESP32-WallBox
@@ -6,10 +27,21 @@ esphome:
     priority: 600
     then:
       - lambda: |-
-          // Falls gespeicherter Wert NaN/Inf ist → auf Startwert setzen
-          if (std::isnan(id(wallbox_energy_kwh)) || std::isinf(id(wallbox_energy_kwh))) {
-            id(wallbox_energy_kwh) = 2775.01f;
+          // Falls gespeicherte Werte ungueltig sind, sichere Defaults setzen.
+          if (std::isnan(id(wallbox_base_kwh)) || std::isinf(id(wallbox_base_kwh))) {
+            id(wallbox_base_kwh) = 2775.01f;
           }
+          if (id(wallbox_pulses_runtime) < id(wallbox_pulses_persisted)) {
+            id(wallbox_pulses_runtime) = id(wallbox_pulses_persisted);
+          }
+          // Migrationsfall: Altbestand nur ueber Basis-kWh, noch keine Impulse gespeichert.
+          if (id(wallbox_pulses_runtime) == 0 && id(wallbox_base_kwh) > 0.0f) {
+            id(wallbox_pulses_runtime) = (uint64_t) llroundf(id(wallbox_base_kwh) * 1000.0f);
+            id(wallbox_pulses_persisted) = id(wallbox_pulses_runtime);
+            id(wallbox_base_kwh) = 0.0f;
+          }
+          id(wallbox_last_raw_pulses) = 0;
+          id(wallbox_unsaved_pulses) = 0;
 
 esp32:
   board: esp32dev
@@ -39,12 +71,33 @@ captive_portal:
 web_server:
   port: 80
 
-# Persistenter kWh-Zähler im Flash
+# Persistente Zaehlerdaten im Flash
 globals:
-  - id: wallbox_energy_kwh
+  # Statischer Basiswert in kWh (fuer manuelle Set/Offset-Korrekturen).
+  - id: wallbox_base_kwh
     type: float
     restore_value: true
     initial_value: "2775.01"
+  # Laufender Gesamtimpulszaehler (fuer Berechnung und Anzeige).
+  - id: wallbox_pulses_runtime
+    type: uint64_t
+    restore_value: false
+    initial_value: "0"
+  # Letzter persistenter Checkpoint (wird nur alle 50 Impulse aktualisiert).
+  - id: wallbox_pulses_persisted
+    type: uint64_t
+    restore_value: true
+    initial_value: "0"
+  # Hilfszaehler seit letztem Flash-Checkpoint (nicht persistent).
+  - id: wallbox_unsaved_pulses
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
+  # Letzter roher Pulse-Counter-Wert seit Boot (nicht persistent).
+  - id: wallbox_last_raw_pulses
+    type: uint32_t
+    restore_value: false
+    initial_value: "0"
 
 # ====== Editierbare Felder in Home Assistant (als Eingabefeld statt Slider) ======
 number:
@@ -62,7 +115,10 @@ number:
     initial_value: 2775.01
     set_action:
       - lambda: |-
-          id(wallbox_energy_kwh) = (float)x;
+          // Absoluten Sollwert setzen, ohne Impulsverlauf zu verlieren:
+          // Neuer Basiswert = Soll - (bisherige Impulse in kWh)
+          const float pulses_kwh = ((float) id(wallbox_pulses_runtime)) / 1000.0f;
+          id(wallbox_base_kwh) = (float)x - pulses_kwh;
       - component.update: wallbox_energy_total
 
   # 2) Offset-Korrektur (addiert/subtrahiert einmalig)
@@ -79,13 +135,13 @@ number:
     initial_value: 0
     set_action:
       - lambda: |-
-          id(wallbox_energy_kwh) += (float)x;
+          id(wallbox_base_kwh) += (float)x;
           // Offset wieder auf 0 zurücksetzen, damit es "einmalig" wirkt
           id(wallbox_offset_kwh).publish_state(0);
       - component.update: wallbox_energy_total
 
 sensor:
-  # S0 Impulsrate (imp/min) -> daraus Leistung (W) berechnen
+  # S0 Impulsrate (imp/min) -> Leistung (W); Rohimpulse seit Boot fuer Delta-Bildung
   - platform: pulse_counter
     pin:
       number: GPIO14
@@ -110,8 +166,14 @@ sensor:
           return x;
       # Annahme: 1000 imp/kWh -> W = (imp/min) * 60
       - multiply: 60.0
+    total:
+      name: "Wallbox Rohimpulse seit Boot"
+      id: wallbox_raw_pulses_boot
+      unit_of_measurement: "imp"
+      state_class: total_increasing
+      accuracy_decimals: 0
 
-  # Zählerstand aus Global (wird auch im Webinterface angezeigt)
+  # Absoluter Zaehlerstand aus Basis-kWh + Gesamtimpulsen
   - platform: template
     name: "Wallbox Zählerstand"
     id: wallbox_energy_total
@@ -121,15 +183,39 @@ sensor:
     accuracy_decimals: 3
     update_interval: 10s
     lambda: |-
-      return id(wallbox_energy_kwh);
+      return id(wallbox_base_kwh) + (((float) id(wallbox_pulses_runtime)) / 1000.0f);
 
-# Energie fortschreiben: aus Leistung (W) + Zeit delta -> kWh addieren
+# Impulse robust aufsummieren und mit Checkpoint persistieren.
 interval:
   - interval: 10s
     then:
       - lambda: |-
-          const float p = id(wallbox_power).state;
-          if (std::isnan(p) || std::isinf(p)) return;
+          const float raw_state = id(wallbox_raw_pulses_boot).state;
+          if (std::isnan(raw_state) || std::isinf(raw_state) || raw_state < 0.0f) {
+            return;
+          }
 
-          const float dt_hours = 10.0f / 3600.0f;
-          id(wallbox_energy_kwh) += (p * dt_hours) / 1000.0f;
+          const uint32_t raw_now = (uint32_t) llroundf(raw_state);
+          uint32_t delta = 0;
+          if (raw_now >= id(wallbox_last_raw_pulses)) {
+            delta = raw_now - id(wallbox_last_raw_pulses);
+          } else {
+            // Pulse-Counter wurde neu gestartet (ESP reboot) -> seit Boot neu zaehlen.
+            delta = raw_now;
+          }
+
+          id(wallbox_last_raw_pulses) = raw_now;
+          if (delta == 0) {
+            return;
+          }
+
+          id(wallbox_pulses_runtime) += (uint64_t) delta;
+          id(wallbox_unsaved_pulses) += delta;
+
+          // Persistenz nur in groesseren Bloecken, um Flash-Schreiblast zu begrenzen.
+          if (id(wallbox_unsaved_pulses) >= 50) {
+            id(wallbox_pulses_persisted) = id(wallbox_pulses_runtime);
+            id(wallbox_unsaved_pulses) = 0;
+          }
+
+      - component.update: wallbox_energy_total
