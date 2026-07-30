@@ -1,12 +1,18 @@
 {
   "domain": "wallbox_billing",
   "name": "Wallbox Abrechnung",
-  "version": "1.1.2",
+  "codeowners": [
+    "@Feberdin"
+  ],
+  "config_flow": true,
+  "dependencies": [
+    "recorder"
+  ],
   "documentation": "https://github.com/Feberdin/ha-wallbox-billing",
-  "issue_tracker": "https://github.com/Feberdin/ha-wallbox-billing/issues",
-  "requirements": ["fpdf2>=2.8.7"],
-  "dependencies": [],
-  "codeowners": ["@Feberdin"],
   "iot_class": "local_polling",
-  "config_flow": true
+  "issue_tracker": "https://github.com/Feberdin/ha-wallbox-billing/issues",
+  "requirements": [
+    "fpdf2>=2.8.7"
+  ],
+  "version": "1.1.2"
 }
