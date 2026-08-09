@@ -377,6 +377,23 @@ Dort sind auch die neuen Optionen für die Tagesübersicht verfügbar:
 
 Die ESPHome-Konfiguration für den ESP32 liegt unter [`esphome/wallbox.yaml`](esphome/wallbox.yaml).
 
+Vor dem Kompilieren benötigt ESPHome eine ausschließlich lokal gespeicherte Secret-Datei:
+
+```bash
+cp esphome/secrets.example.yaml esphome/secrets.yaml
+chmod 600 esphome/secrets.yaml
+```
+
+Ersetze danach in `esphome/secrets.yaml` alle Platzhalter durch eigene Werte. Die Datei ist in
+`.gitignore` eingetragen und darf nicht committed oder als Debug-Ausgabe geteilt werden. Erzeuge
+für `api_encryption_key`, `ota_password` und `fallback_ap_password` neue, voneinander unabhängige
+Werte. Nach dem Flashen muss der neue API-Schlüssel auch in der ESPHome-Gerätekonfiguration von
+Home Assistant hinterlegt werden.
+
+> **Sicherheitshinweis:** Frühere Revisionen enthielten ESPHome-Zugangswerte im Git-Verlauf. Diese
+> Werte gelten als offengelegt und müssen auf dem Gerät rotiert werden. Eine spätere Bereinigung
+> der Git-Historie ersetzt die Rotation nicht.
+
 **Zählerstand manuell setzen** (z. B. nach Anbieterwechsel oder Gerätetausch):
 
 In Home Assistant unter dem ESP32-Gerät → Zahl **„Wallbox Zählerstand setzen"** → gewünschten Wert eingeben.

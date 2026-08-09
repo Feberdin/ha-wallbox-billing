@@ -22,6 +22,10 @@ You can expect an acknowledgement within 48 hours. We will work with you to unde
 ## Security Notes
 
 - SMTP credentials (password) are stored in Home Assistant's encrypted config entry storage
+- ESPHome Wi-Fi, API encryption, OTA, and fallback access values belong in the ignored
+  `esphome/secrets.yaml`; the repository contains only `!secret` references and a placeholder template
+- Any ESPHome credentials previously committed to Git must be rotated on the device; rewriting Git
+  history alone does not invalidate exposed credentials
 - No data is sent to external services other than the configured SMTP server
 - PDF invoices are generated locally and only sent to the configured email recipient
 - No telemetry or analytics are collected

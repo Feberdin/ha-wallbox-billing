@@ -3,6 +3,7 @@ PROJEKT_KONTEXT.md
 
 # Lokale Konfiguration
 .claude/
+esphome/secrets.yaml
 
 # Bedienungsanleitungen / Datenblätter (binäre PDFs gehören nicht ins Repo)
 *.pdf
