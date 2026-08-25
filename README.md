@@ -416,3 +416,13 @@ In Home Assistant unter dem ESP32-Gerät → Zahl **„Wallbox Zählerstand setz
 *Entwickelt für Home Assistant mit ESPHome + Eltako DSZ15D über S0-Schnittstelle.*
 
 > **Affiliate-Hinweis:** Die mit 🛒 gekennzeichneten Links sind Amazon Affiliate-Links. Beim Kauf über diese Links erhalte ich eine kleine Provision ohne Mehrkosten für dich. Danke für deine Unterstützung!
+
+
+## Troubleshooting und Debugging
+
+- ESPHome-Gerät offline: Stromversorgung, WLAN und Home-Assistant-API-Status prüfen.
+- OTA nach Secret-Rotation nicht möglich: den zuletzt gültigen OTA-Zugang
+  verwenden oder das Gerät kontrolliert per USB neu flashen.
+- Abrechnung unplausibel: S0-Impulsrate, Zählerstand und Automationszeitraum prüfen.
+
+Keine API-, OTA-, WLAN- oder SMTP-Werte in Logs, Issues oder Screenshots kopieren.
