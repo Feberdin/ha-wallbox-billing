@@ -377,6 +377,36 @@ Dort sind auch die neuen Optionen für die Tagesübersicht verfügbar:
 
 Die ESPHome-Konfiguration für den ESP32 liegt unter [`esphome/wallbox.yaml`](esphome/wallbox.yaml).
 
+### Secrets sicher einrichten
+
+Die API-Verschlüsselung, das OTA-Passwort und das Passwort des Fallback-WLANs
+stehen niemals direkt in `wallbox.yaml`. Erstelle lokal die ignorierte Datei:
+
+```bash
+cp esphome/secrets.example.yaml esphome/secrets.yaml
+```
+
+Erzeuge für jeden Eintrag einen neuen, unabhängigen Wert. Der API-Schlüssel muss
+ein Base64-kodierter 32-Byte-Wert sein; die beiden Passwörter sollten ebenfalls
+zufällig und eindeutig sein. Eine lokale Erzeugung ist beispielsweise möglich mit:
+
+```bash
+openssl rand -base64 32
+openssl rand -hex 24
+openssl rand -hex 24
+```
+
+Übertrage keine Ausgabe dieser Befehle in Git, Issues, Logs oder Screenshots.
+Nachdem ein Wert versehentlich veröffentlicht wurde, muss er auf dem ESP32
+geändert werden; das bloße Löschen aus Git macht ihn nicht wieder geheim.
+
+Vor einem Commit:
+
+```bash
+python3 -m unittest discover -s tests -p 'test_*.py' -v
+gitleaks dir . --redact=100
+```
+
 **Zählerstand manuell setzen** (z. B. nach Anbieterwechsel oder Gerätetausch):
 
 In Home Assistant unter dem ESP32-Gerät → Zahl **„Wallbox Zählerstand setzen"** → gewünschten Wert eingeben.
