@@ -3,6 +3,7 @@
 fpdf2 is imported lazily inside generate_invoice_pdf() so that the integration
 package can be loaded by Home Assistant even before fpdf2 is installed.
 """
+
 from __future__ import annotations
 
 import datetime
@@ -40,7 +41,7 @@ def generate_invoice_pdf(
     reading_current: float,
     price_per_kwh: float,
     start_datetime: datetime.datetime | None = None,
-    daily_data: list[tuple[datetime.date, float]] | None = None,
+    daily_data: list[tuple[datetime.date, float | None]] | None = None,
 ) -> bytes:
     """Generate a PDF invoice and return it as bytes.
 
@@ -218,7 +219,7 @@ def generate_invoice_pdf(
 
 def _add_daily_page(
     pdf,
-    daily_data: list[tuple[datetime.date, float]],
+    daily_data: list[tuple[datetime.date, float | None]],
     price_per_kwh: float,
     billed_consumption: float,
     billed_total: float,
@@ -248,22 +249,42 @@ def _add_daily_page(
     # ── Tageszeilen ──────────────────────────────────────────────────────────
     pdf.set_font("Helvetica", "", 10)
     for i, (day, kwh) in enumerate(daily_data):
-        cost = kwh * price_per_kwh
+        cost = kwh * price_per_kwh if kwh is not None else None
         fill_color = (248, 250, 255) if i % 2 == 0 else (255, 255, 255)
         pdf.set_fill_color(*fill_color)
         pdf.cell(col_date, 6, f"  {_fmt_date(day)}", ln=False, fill=True, border=1)
-        pdf.cell(col_kwh, 6, _fmt_kwh(kwh), ln=False, fill=True, border=1, align="R")
-        pdf.cell(col_eur, 6, _fmt_eur(cost), ln=True, fill=True, border=1, align="R")
+        pdf.cell(
+            col_kwh,
+            6,
+            _fmt_kwh(kwh) if kwh is not None else "Daten fehlen",
+            ln=False,
+            fill=True,
+            border=1,
+            align="R",
+        )
+        pdf.cell(
+            col_eur,
+            6,
+            _fmt_eur(cost) if cost is not None else "Unbekannt",
+            ln=True,
+            fill=True,
+            border=1,
+            align="R",
+        )
 
     # ── Summenzeile ──────────────────────────────────────────────────────────
-    daily_sum_kwh = sum(kwh for _, kwh in daily_data)
+    daily_sum_kwh = sum(kwh for _, kwh in daily_data if kwh is not None)
     daily_sum_eur = daily_sum_kwh * price_per_kwh
 
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_fill_color(200, 215, 240)
-    pdf.cell(col_date, 7, "  Summe Tageswerte", ln=False, fill=True, border=1)
-    pdf.cell(col_kwh, 7, _fmt_kwh(daily_sum_kwh), ln=False, fill=True, border=1, align="R")
-    pdf.cell(col_eur, 7, _fmt_eur(daily_sum_eur), ln=True, fill=True, border=1, align="R")
+    pdf.cell(col_date, 7, "  Summe bekannter Tageswerte", ln=False, fill=True, border=1)
+    pdf.cell(
+        col_kwh, 7, _fmt_kwh(daily_sum_kwh), ln=False, fill=True, border=1, align="R"
+    )
+    pdf.cell(
+        col_eur, 7, _fmt_eur(daily_sum_eur), ln=True, fill=True, border=1, align="R"
+    )
 
     pdf.ln(4)
 
@@ -271,8 +292,18 @@ def _add_daily_page(
     pdf.set_font("Helvetica", "B", 10)
     pdf.set_fill_color(240, 243, 250)
     pdf.cell(col_date, 7, "  Rechnungsbetrag (S. 1)", ln=False, fill=True, border=1)
-    pdf.cell(col_kwh, 7, _fmt_kwh(billed_consumption), ln=False, fill=True, border=1, align="R")
-    pdf.cell(col_eur, 7, _fmt_eur(billed_total), ln=True, fill=True, border=1, align="R")
+    pdf.cell(
+        col_kwh,
+        7,
+        _fmt_kwh(billed_consumption),
+        ln=False,
+        fill=True,
+        border=1,
+        align="R",
+    )
+    pdf.cell(
+        col_eur, 7, _fmt_eur(billed_total), ln=True, fill=True, border=1, align="R"
+    )
 
     diff_kwh = daily_sum_kwh - billed_consumption
     diff_eur = daily_sum_eur - billed_total
@@ -291,14 +322,22 @@ def _add_daily_page(
     pdf.set_font("Helvetica", "B", 10)
     pdf.cell(col_date, 7, "  Differenz", ln=False, fill=True, border=1)
     pdf.cell(
-        col_kwh, 7,
+        col_kwh,
+        7,
         f"{sign}{_fmt_kwh(diff_kwh)}",
-        ln=False, fill=True, border=1, align="R",
+        ln=False,
+        fill=True,
+        border=1,
+        align="R",
     )
     pdf.cell(
-        col_eur, 7,
+        col_eur,
+        7,
         f"{sign}{_fmt_eur(diff_eur)}",
-        ln=True, fill=True, border=1, align="R",
+        ln=True,
+        fill=True,
+        border=1,
+        align="R",
     )
     pdf.set_text_color(0, 0, 0)
 
@@ -307,12 +346,12 @@ def _add_daily_page(
     pdf.set_font("Helvetica", "I", 9)
     pdf.set_text_color(100, 100, 100)
     hint = (
-        "Hinweis: Die Tageswerte basieren auf den stündlichen Statistiken des "
-        "Home Assistant Recorders. Die Ablesung erfolgt täglich zur konfigurierten "
-        "Stunde (Standardwert: 00:00 Uhr). Differenzen zum Rechnungsbetrag entstehen "
-        "durch unterschiedliche Ablese-Uhrzeiten beim Abrechnungsstart und -ende "
-        "(z. B. wenn eine Abrechnung tagsüber ausgelöst wird). "
-        "Fehlende Recorder-Daten werden als 0,000 kWh dargestellt."
+        "Hinweis: Diese Zusatzuebersicht verwendet Kalendertage ab 00:00 Uhr "
+        "aus dem Home Assistant Recorder, nicht die exakten Abrechnungszeiten. "
+        "Fehlende oder ruecklaeufige Daten sind unbekannt, nicht Nullverbrauch. "
+        "Abweichungen koennen auch durch Kalibrierungen oder Datenfehler entstehen "
+        "und muessen geprueft werden. Massgeblich sind die bestaetigten "
+        "Zaehlerstaende auf Seite 1; Tageswerte sind keine zweite Forderung."
     )
     pdf.multi_cell(col_date + col_kwh + col_eur, 5, hint)
     pdf.set_text_color(0, 0, 0)

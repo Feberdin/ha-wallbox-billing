@@ -11,6 +11,8 @@ esphome/.esphome/
 !docs/examples/Beispiel-WallboxAbrechnung-mit-Tagesausgabe.pdf
 
 # Python
+.venv/
+.ruff_cache/
 __pycache__/
 *.pyc
 *.pyo

@@ -195,7 +195,7 @@ Eine ausführliche Anleitung zur Verdrahtung des S0-Ausgangs eines Stromzählers
 
 | Feld | Beschreibung |
 |------|-------------|
-| Empfänger-E-Mail | E-Mail-Adresse des Arbeitgebers |
+| Empfänger-E-Mail | Empfänger-E-Mail (einfach mehrere mit Komma oder Semikolon getrennt) |
 | SMTP-Host | Mailserver deines E-Mail-Anbieters |
 | Port | Meist 587 (TLS) oder 465 (SSL) |
 | Absender-E-Mail | Deine E-Mail-Adresse |
@@ -426,3 +426,9 @@ In Home Assistant unter dem ESP32-Gerät → Zahl **„Wallbox Zählerstand setz
 - Abrechnung unplausibel: S0-Impulsrate, Zählerstand und Automationszeitraum prüfen.
 
 Keine API-, OTA-, WLAN- oder SMTP-Werte in Logs, Issues oder Screenshots kopieren.
+
+## Abrechnungssicherheit
+
+Der echte Rechnungsversand verlangt einen direkt abgelesenen, bestätigten
+Zählerstand. Details zu Korrekturen ohne E-Mail-Versand, Tests und Diagnose stehen
+in [BILLING_CORRECTIONS.md](docs/BILLING_CORRECTIONS.md).
