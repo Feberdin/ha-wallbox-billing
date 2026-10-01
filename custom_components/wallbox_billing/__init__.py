@@ -1,10 +1,19 @@
-"""Wallbox Billing – Home Assistant custom integration."""
+"""Wallbox Billing: validated invoices and auditable baseline corrections.
+
+Inputs are HA sensor readings and explicit service fields. Corrections persist
+before refreshing entities and never send mail. Debug via wallbox_billing logs;
+do not log configuration dictionaries, which contain SMTP credentials.
+"""
+
 from __future__ import annotations
 
+import asyncio
 import datetime
 import logging
+import math
 import random
 import smtplib
+import re
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -13,6 +22,8 @@ import voluptuous as vol
 
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import ServiceValidationError
+from homeassistant.helpers.service import async_register_admin_service
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -60,6 +71,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         "config": {**entry.data, **entry.options},
         "store": store,
         "stored": stored,
+        "lock": asyncio.Lock(),
     }
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
@@ -74,11 +86,25 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def _handle_send_sample_pdf(call: ServiceCall) -> None:
         await _async_send_sample_pdf(hass, entry, call)
 
+    async def _handle_correct_last_reading(call: ServiceCall) -> None:
+        await _async_correct_last_reading(hass, call)
+
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        "correct_last_reading",
+        _handle_correct_last_reading,
+        schema=_CORRECTION_SCHEMA,
+    )
+
     hass.services.async_register(
-        DOMAIN, SERVICE_SEND_INVOICE, _handle_send_invoice, schema=vol.Schema({})
+        DOMAIN, SERVICE_SEND_INVOICE, _handle_send_invoice, schema=_SERVICE_SCHEMA
     )
     hass.services.async_register(
-        DOMAIN, SERVICE_SEND_TEST_INVOICE, _handle_send_test_invoice, schema=vol.Schema({})
+        DOMAIN,
+        SERVICE_SEND_TEST_INVOICE,
+        _handle_send_test_invoice,
+        schema=_SERVICE_SCHEMA,
     )
     hass.services.async_register(
         DOMAIN, SERVICE_SEND_SAMPLE_PDF, _handle_send_sample_pdf, schema=vol.Schema({})
@@ -107,7 +133,7 @@ async def _async_fetch_daily_stats(
     start_date: datetime.date,
     end_date: datetime.date,
     hour: int = 0,  # reserviert für Kompatibilität, wird bei period="day" nicht genutzt
-) -> list[tuple[datetime.date, float]]:
+) -> list[tuple[datetime.date, float | None]]:
     """Tagesverbrauch aus HA Recorder-Statistiken (Tagesauflösung).
 
     Nutzt period="day" für maximale Kompatibilität mit HA 2023+.
@@ -115,7 +141,7 @@ async def _async_fetch_daily_stats(
     zurück – kein datetime-Objekt. Beide Formate werden korrekt behandelt.
 
     Gibt für jeden Kalendertag von start_date bis end_date ein (date, kwh)-Tupel zurück.
-    Fehlen Datenpunkte für einen Tag, wird 0.0 verwendet.
+    Fehlende oder rückläufige Summen sind unbekannt (None), nicht Nullverbrauch.
     """
     try:
         from homeassistant.components.recorder import get_instance  # noqa: PLC0415
@@ -149,7 +175,7 @@ async def _async_fetch_daily_stats(
             query_end,
             {sensor_id},
             "day",
-            None,   # keine Einheitenumrechnung – Sensor liefert bereits kWh
+            None,  # keine Einheitenumrechnung – Sensor liefert bereits kWh
             {"sum"},
         )
     except Exception as exc:  # noqa: BLE001
@@ -166,8 +192,14 @@ async def _async_fetch_daily_stats(
     sum_by_date: dict[datetime.date, float] = {}
     for entry in stats[sensor_id]:
         # Attributzugriff funktioniert sowohl für dict als auch für TypedDict/dataclass
-        ts_raw = entry.get("start") if isinstance(entry, dict) else getattr(entry, "start", None)
-        val = entry.get("sum") if isinstance(entry, dict) else getattr(entry, "sum", None)
+        ts_raw = (
+            entry.get("start")
+            if isinstance(entry, dict)
+            else getattr(entry, "start", None)
+        )
+        val = (
+            entry.get("sum") if isinstance(entry, dict) else getattr(entry, "sum", None)
+        )
 
         if ts_raw is None or val is None:
             continue
@@ -192,18 +224,29 @@ async def _async_fetch_daily_stats(
     )
 
     # Tagesverbrauch = Differenz aufeinanderfolgender Tagessummen
-    result: list[tuple[datetime.date, float]] = []
+    result: list[tuple[datetime.date, float | None]] = []
     prev_date = start_date - datetime.timedelta(days=1)
     current = start_date
     while current <= end_date:
         sum_prev = sum_by_date.get(prev_date)
         sum_curr = sum_by_date.get(current)
 
-        if sum_prev is not None and sum_curr is not None:
-            consumption = max(0.0, sum_curr - sum_prev)
+        if (
+            sum_prev is not None
+            and sum_curr is not None
+            and math.isfinite(sum_prev)
+            and math.isfinite(sum_curr)
+            and sum_curr >= sum_prev
+        ):
+            consumption = sum_curr - sum_prev
         else:
-            _LOGGER.debug("Keine Recorder-Daten für %s (prev=%s, curr=%s)", current, sum_prev, sum_curr)
-            consumption = 0.0
+            _LOGGER.debug(
+                "Keine Recorder-Daten für %s (prev=%s, curr=%s)",
+                current,
+                sum_prev,
+                sum_curr,
+            )
+            consumption = None
 
         result.append((current, consumption))
         prev_date = current
@@ -213,6 +256,18 @@ async def _async_fetch_daily_stats(
 
 
 async def _async_send_invoice(
+    hass: HomeAssistant,
+    entry: ConfigEntry,
+    call: ServiceCall,
+    *,
+    test_mode: bool = False,
+) -> None:
+    """Serialize sending and correction so neither overwrites a newer baseline."""
+    async with hass.data[DOMAIN][entry.entry_id]["lock"]:
+        await _async_send_invoice_locked(hass, entry, call, test_mode=test_mode)
+
+
+async def _async_send_invoice_locked(
     hass: HomeAssistant,
     entry: ConfigEntry,
     call: ServiceCall,
@@ -245,8 +300,11 @@ async def _async_send_invoice(
     last_date_str = stored.get("last_date")
     last_datetime_str = stored.get("last_datetime")
 
-    today = datetime.date.today()
-    now = datetime.datetime.now()
+    try:
+        today, now = _invoice_dates_from_service_call(call)
+    except ValueError as exc:
+        _LOGGER.error("%s", exc)
+        return
 
     if last_reading is None:
         # Erste Abrechnung: Startwerte aus Konfiguration
@@ -276,8 +334,39 @@ async def _async_send_invoice(
 
     owner_name = cfg[CONF_OWNER_NAME]
     meter_number = cfg[CONF_METER_NUMBER]
-    recipient_email = cfg[CONF_RECIPIENT_EMAIL]
+    recipients = _split_recipients(cfg[CONF_RECIPIENT_EMAIL])
+    if not recipients:
+        _LOGGER.error("Keine gültigen Empfänger-E-Mail-Adressen konfiguriert.")
+        return
     price_per_kwh = float(cfg[CONF_PRICE_PER_KWH])
+
+    # A live software counter is not proof of the physical meter reading.
+    # Confirmation is mandatory for money claims, never inferred from the sensor.
+    for value in (last_reading, current_reading, price_per_kwh):
+        if not math.isfinite(float(value)) or float(value) < 0:
+            raise ServiceValidationError(
+                "Abrechnung: ungültiger Zählerstand oder Preis."
+            )
+    if current_reading < last_reading:
+        raise ServiceValidationError(
+            "Zählerstand liegt unter der letzten Abrechnung. Erst Ablesung und "
+            "Abrechnungsstart prüfen; es wurde keine E-Mail gesendet."
+        )
+    if not test_mode:
+        confirmed = call.data.get("confirmed_meter_reading")
+        if confirmed is None:
+            raise ServiceValidationError(
+                "Physischer Zählerstand muss mit confirmed_meter_reading bestätigt "
+                "werden. Am Zähler ablesen; es wurde keine E-Mail gesendet."
+            )
+        if (
+            not math.isfinite(float(confirmed))
+            or abs(float(confirmed) - current_reading) > 0.01
+        ):
+            raise ServiceValidationError(
+                "Bestätigte Ablesung weicht vom Softwarezähler ab. Zähler erst "
+                "abgleichen; es wurde keine E-Mail gesendet."
+            )
 
     # Tagesstatistiken aus Recorder holen (wenn Option aktiv)
     # Optionaler separater Statistik-Sensor; Fallback auf Haupt-Energiesensor
@@ -296,7 +385,7 @@ async def _async_send_invoice(
         generate_invoice_pdf,
         owner_name,
         meter_number,
-        recipient_email,
+        recipients[0],
         last_date,
         today,
         last_reading,
@@ -328,7 +417,7 @@ async def _async_send_invoice(
     )
     body = (
         f"<p>Guten Tag,</p>"
-        f"{('<p><strong style=\"color:#cc0000\">[TEST-E-Mail – keine Werte wurden gespeichert]</strong></p>' if test_mode else '')}"
+        f"{('<p><strong style="color:#cc0000">[TEST-E-Mail – keine Werte wurden gespeichert]</strong></p>' if test_mode else '')}"
         f"<p>anbei finden Sie die Erstattungsanforderung für die Ladekosten "
         f"des Dienstfahrzeuges an der privaten Wallbox.</p>"
         f"<table style='border-collapse:collapse;font-family:sans-serif'>"
@@ -348,7 +437,13 @@ async def _async_send_invoice(
 
     try:
         await hass.async_add_executor_job(
-            _send_email_sync, smtp_cfg, recipient_email, subject, body, pdf_bytes, filename
+            _send_email_sync,
+            smtp_cfg,
+            recipients,
+            subject,
+            body,
+            pdf_bytes,
+            filename,
         )
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("E-Mail-Versand fehlgeschlagen: %s", exc)
@@ -402,13 +497,24 @@ async def _async_send_sample_pdf(
     total_consumption = reading_curr - reading_prev
     base_per_day = total_consumption / max(num_days, 1)
     rng = random.Random(42)
-    raw = [max(0.0, base_per_day + rng.uniform(-base_per_day * 0.4, base_per_day * 0.4)) for _ in range(num_days)]
+    raw = [
+        max(0.0, base_per_day + rng.uniform(-base_per_day * 0.4, base_per_day * 0.4))
+        for _ in range(num_days)
+    ]
     # Normieren damit die Summe passt
     raw_sum = sum(raw) or 1.0
     daily_data = [
-        (period_from + datetime.timedelta(days=i), round(v / raw_sum * total_consumption, 3))
+        (
+            period_from + datetime.timedelta(days=i),
+            round(v / raw_sum * total_consumption, 3),
+        )
         for i, v in enumerate(raw)
     ]
+
+    recipients = _split_recipients(cfg[CONF_RECIPIENT_EMAIL])
+    if not recipients:
+        _LOGGER.error("Keine gültigen Empfänger-E-Mail-Adressen konfiguriert.")
+        return
 
     from .pdf_generator import generate_invoice_pdf  # noqa: PLC0415
 
@@ -416,7 +522,7 @@ async def _async_send_sample_pdf(
         generate_invoice_pdf,
         owner_name,
         meter_number,
-        cfg[CONF_RECIPIENT_EMAIL],
+        recipients[0],
         period_from,
         today,
         reading_prev,
@@ -426,7 +532,6 @@ async def _async_send_sample_pdf(
         daily_data,
     )
 
-    recipient_email = cfg[CONF_RECIPIENT_EMAIL]
     filename = f"Wallbox_Beispiel_{today.strftime('%Y-%m')}.pdf"
     smtp_cfg = {
         "host": cfg[CONF_SMTP_HOST],
@@ -457,18 +562,143 @@ async def _async_send_sample_pdf(
 
     try:
         await hass.async_add_executor_job(
-            _send_email_sync, smtp_cfg, recipient_email, subject, body, pdf_bytes, filename
+            _send_email_sync,
+            smtp_cfg,
+            recipients,
+            subject,
+            body,
+            pdf_bytes,
+            filename,
         )
     except Exception as exc:  # noqa: BLE001
         _LOGGER.error("Beispiel-PDF-Versand fehlgeschlagen: %s", exc)
         return
 
-    _LOGGER.info("Beispiel-PDF erfolgreich gesendet an %s", recipient_email)
+    _LOGGER.info("Beispiel-PDF erfolgreich gesendet an %s", ", ".join(recipients))
+
+
+def _split_recipients(value: str) -> list[str]:
+    """Split recipient emails by comma or semicolon and normalize entries."""
+    return [email.strip() for email in re.split(r"[;,]", value) if email.strip()]
+
+
+_SERVICE_SCHEMA = vol.Schema(
+    {
+        vol.Optional("invoice_date"): str,
+        vol.Optional("confirmed_meter_reading"): vol.All(
+            vol.Coerce(float), vol.Range(min=0)
+        ),
+    },
+    extra=vol.ALLOW_EXTRA,
+)
+
+_CORRECTION_SCHEMA = vol.Schema(
+    {
+        vol.Required("entry_id"): str,
+        vol.Required("expected_last_reading"): vol.Coerce(float),
+        vol.Required("expected_last_datetime"): str,
+        vol.Required("corrected_reading"): vol.All(vol.Coerce(float), vol.Range(min=0)),
+        vol.Required("reason"): vol.All(str, vol.Length(min=10, max=300)),
+    }
+)
+
+
+async def _async_correct_last_reading(hass: HomeAssistant, call: ServiceCall) -> None:
+    """Correct one persisted baseline using compare-and-set; no SMTP side effects.
+
+    Example: stored 100, expected 100, corrected 99 keeps the existing billing
+    date and records the 100 -> 99 correction. A newer stored reading refuses it.
+    The public service is admin-only and shares the invoice's per-entry lock.
+    """
+    entry_id = call.data["entry_id"]
+    data = hass.data.get(DOMAIN, {}).get(entry_id)
+    if data is None:
+        raise ServiceValidationError("Wallbox-Eintrag nicht geladen. entry_id prüfen.")
+    async with data["lock"]:
+        stored = data["stored"]
+        previous = stored.get("last_reading")
+        corrected = call.data["corrected_reading"]
+        expected = call.data["expected_last_reading"]
+        state = hass.states.get(data["config"][CONF_ENERGY_SENSOR])
+        try:
+            current = float(state.state) if state else math.nan
+            valid = all(
+                math.isfinite(float(v)) and float(v) >= 0
+                for v in (previous, corrected, expected, current)
+            )
+        except (TypeError, ValueError):
+            valid = False
+        if not valid:
+            raise ServiceValidationError(
+                "Ablesungen fehlen oder sind ungültig. Sensor prüfen."
+            )
+        if (
+            abs(previous - expected) > 0.000001
+            or stored.get("last_datetime") != call.data["expected_last_datetime"]
+        ):
+            raise ServiceValidationError(
+                "Abrechnungsstart wurde inzwischen geändert. Neu prüfen."
+            )
+        if corrected > current + 0.001:
+            raise ServiceValidationError(
+                "Abrechnungsstart darf nicht über dem aktuellen Zähler liegen."
+            )
+
+        updated = dict(stored)
+        updated["last_reading"] = corrected
+        updated["corrections"] = [
+            *stored.get("corrections", []),
+            {
+                "at": dt_util.utcnow().isoformat(),
+                "previous_reading": previous,
+                "corrected_reading": corrected,
+                "billing_datetime": stored["last_datetime"],
+                "reason": call.data["reason"],
+            },
+        ]
+        # Disk first: a failed save must leave in-memory entities unchanged.
+        await data["store"].async_save(updated)
+        data["stored"] = updated
+        hass.bus.async_fire(f"{DOMAIN}_reading_corrected", {"entry_id": entry_id})
+        _LOGGER.info(
+            "Wallbox-Abrechnungsstart korrigiert; Datum unverändert, kein Versand"
+        )
+
+
+def _invoice_dates_from_service_call(
+    call: ServiceCall,
+) -> tuple[datetime.date, datetime.datetime]:
+    """
+    Resolve invoice date and timestamp for service execution.
+
+    - invoice_date (optional): ISO date string YYYY-MM-DD.
+    """
+    requested_date = call.data.get("invoice_date")
+    if not requested_date:
+        return datetime.date.today(), datetime.datetime.now()
+
+    if not isinstance(requested_date, str):
+        raise ValueError(
+            "Ungültiger Typ für invoice_date: Erwartet wird ein ISO-Datum 'YYYY-MM-DD'."
+        )
+
+    value = requested_date.strip()
+    if not value:
+        return datetime.date.today(), datetime.datetime.now()
+
+    try:
+        invoice_date = datetime.date.fromisoformat(value)
+    except ValueError as exc:
+        raise ValueError(
+            f"Ungültiges invoice_date '{value}'. Format muss YYYY-MM-DD sein."
+        ) from exc
+
+    return invoice_date, datetime.datetime.combine(invoice_date, datetime.time(0, 0))
 
 
 def _send_email_sync(
     smtp_cfg: dict,
-    to_email: str,
+    to_emails: list[str],
     subject: str,
     body_html: str,
     pdf_bytes: bytes,
@@ -477,7 +707,7 @@ def _send_email_sync(
     """Blocking SMTP send – runs in executor."""
     msg = MIMEMultipart("mixed")
     msg["From"] = smtp_cfg["from_email"]
-    msg["To"] = to_email
+    msg["To"] = ", ".join(to_emails)
     msg["Subject"] = subject
 
     msg.attach(MIMEText(body_html, "html", "utf-8"))
@@ -496,5 +726,5 @@ def _send_email_sync(
     if smtp_cfg["username"]:
         server.login(smtp_cfg["username"], smtp_cfg["password"])
 
-    server.send_message(msg)
+    server.send_message(msg, from_addr=smtp_cfg["from_email"], to_addrs=to_emails)
     server.quit()

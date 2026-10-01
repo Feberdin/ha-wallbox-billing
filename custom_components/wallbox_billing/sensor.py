@@ -1,4 +1,5 @@
 """Sensor platform for Wallbox Billing."""
+
 from __future__ import annotations
 
 import datetime
@@ -89,6 +90,11 @@ class _WallboxBaseSensor(SensorEntity):
         self.async_on_remove(
             self._hass.bus.async_listen(
                 f"{DOMAIN}_invoice_sent", self._handle_invoice_sent
+            )
+        )
+        self.async_on_remove(
+            self._hass.bus.async_listen(
+                f"{DOMAIN}_reading_corrected", self._handle_invoice_sent
             )
         )
 
@@ -203,3 +209,11 @@ class WallboxLastBillingReadingSensor(_WallboxBaseSensor):
     @property
     def native_value(self) -> float | None:
         return self._last_reading()
+
+    @property
+    def extra_state_attributes(self) -> dict:
+        """Expose only the compare-and-set timestamp, never SMTP configuration."""
+        return {
+            "billing_datetime": self._stored.get("last_datetime"),
+            "correction_count": len(self._stored.get("corrections", [])),
+        }

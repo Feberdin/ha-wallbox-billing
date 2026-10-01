@@ -4,7 +4,26 @@ send_invoice:
     Erstellt eine PDF-Rechnung für den aktuellen Abrechnungszeitraum und
     sendet sie per E-Mail. Anschließend wird der aktuelle Zählerstand als
     neuer Startwert gespeichert.
-  fields: {}
+  fields:
+    confirmed_meter_reading:
+      name: Bestätigter physischer Zählerstand
+      description: Am Eltako ablesen. Ohne Bestätigung wird keine echte Rechnung versendet.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 9999999
+          step: 0.001
+          mode: box
+          unit_of_measurement: kWh
+    invoice_date:
+      name: Ausführungsdatum
+      description: >
+        Optionales ISO-Datum (YYYY-MM-DD), um den Versand als spätere oder frühere
+        Ausführung zu simulieren (z. B. 2026-08-01). Wenn leer, wird das heutige
+        Systemdatum verwendet.
+      required: false
+      example: "2026-08-01"
 
 send_test_invoice:
   name: Wallbox Test-Rechnung senden
@@ -12,7 +31,14 @@ send_test_invoice:
     Erstellt eine PDF-Rechnung mit den aktuellen echten Werten und sendet sie
     per E-Mail (Subject-Prefix "TEST:"). Zählerstand, Datum und alle anderen
     gespeicherten Werte werden dabei NICHT verändert.
-  fields: {}
+  fields:
+    invoice_date:
+      name: Ausführungsdatum
+      description: >
+        Optionales ISO-Datum (YYYY-MM-DD) für den simulierten Versandzeitpunkt
+        der Test-Rechnung.
+      required: false
+      example: "2026-08-01"
 
 send_sample_pdf:
   name: Wallbox Beispiel-PDF senden
@@ -21,3 +47,33 @@ send_sample_pdf:
     konfigurierte E-Mail-Adresse. Nützlich zum Prüfen des PDF-Layouts und
     der E-Mail-Zustellung. Es werden keine echten Werte verwendet.
   fields: {}
+
+correct_last_reading:
+  name: Abrechnungsstart korrigieren (ohne Versand)
+  description: >
+    Nur Administratoren. Korrigiert genau einen gespeicherten Abrechnungsstand
+    mit Änderungsnachweis. Datum, Hardwarezähler und Recorder bleiben unverändert.
+    Erwarteter Altwert und Zeitstempel schützen vor veralteten Änderungen.
+  fields:
+    entry_id:
+      name: Integrationseintrag
+      required: true
+      selector:
+        config_entry:
+          integration: wallbox_billing
+    expected_last_reading:
+      name: Erwarteter gespeicherter Zählerstand
+      required: true
+      example: 100.0
+    expected_last_datetime:
+      name: Erwarteter gespeicherter Abrechnungszeitpunkt (ISO)
+      required: true
+      example: "2026-09-01T08:00:00+02:00"
+    corrected_reading:
+      name: Korrigierter Abrechnungsstand
+      required: true
+      example: 99.0
+    reason:
+      name: Beleg und Grund der Korrektur (keine Zugangsdaten)
+      required: true
+      example: "Abgleich mit freigegebenem Korrekturbeleg"

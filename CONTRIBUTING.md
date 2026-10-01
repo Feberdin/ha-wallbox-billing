@@ -32,6 +32,11 @@ Use the [Feature Request template](.github/ISSUE_TEMPLATE/feature_request.md). P
 
 ## Development Setup
 
+Offline regression tests and the safe correction workflow are documented in
+[BILLING_CORRECTIONS.md](docs/BILLING_CORRECTIONS.md). Use only synthetic test
+readings and `.invalid` email addresses. Never send test mail through production
+accounts or commit private invoice PDFs, meter photos, or Home Assistant stores.
+
 1. Clone the repo into your HA `custom_components` directory:
    ```
    custom_components/wallbox_billing/
